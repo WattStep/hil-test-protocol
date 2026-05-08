@@ -1,5 +1,5 @@
 [package]
-name = "amp-trace-hil"
+name = "hil-test-protocol"
 version = "0.1.0"
 edition = "2024"
 description = "Shared types for AmpTrace HIL test definitions"

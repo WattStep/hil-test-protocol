@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,6 +18,12 @@ pub struct TestCase {
     pub teardown: Vec<TestStep>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Requirement {
+    Can,
+    Rtt,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum TestStep {
@@ -28,13 +36,39 @@ pub enum TestStep {
     WaitForSignal(SignalWait),
     /// Unconditional pause.
     Delay { ms: u64 },
-    /// Runtime branch: evaluates arms in order and executes the first matching one.
-    /// Covers paths that depend on actual device behavior observed during the test.
-    /// For paths known at authoring time, use normal Rust control flow in the
-    /// hil-tests crate to build an already-expanded Vec<TestStep>.
-    Branch(BranchStep),
-    // Reserved for future use:
-    // RpcCall(RpcAction),
+    /// Call a postcard-rpc endpoint on the target over RTT. Requires a debugger connection.
+    RpcCall(RpcAction),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RpcAction {
+    /// Endpoint path as registered in the firmware (e.g. "motor/set_velocity").
+    pub path: String,
+    /// JSON payload matching the endpoint's request type.
+    pub payload: serde_json::Value,
+    /// How long to wait for a response before failing the step.
+    pub timeout_ms: u64,
+}
+
+impl TestStep {
+    pub fn requirement(&self) -> Option<Requirement> {
+        match self {
+            TestStep::SendCan(_) => Some(Requirement::Can),
+            TestStep::RpcCall(_) => Some(Requirement::Rtt),
+            _ => None,
+        }
+    }
+}
+
+impl TestCase {
+    pub fn infer_requirements(&self) -> HashSet<Requirement> {
+        self.setup
+            .iter()
+            .chain(&self.steps)
+            .chain(&self.teardown)
+            .filter_map(|s| s.requirement())
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +169,22 @@ pub fn assert_signal(
     })
 }
 
+/// Implemented for each postcard-rpc endpoint type. Ties the request payload
+/// type and the path string together so both are verified at compile time.
+pub trait RpcEndpoint {
+    type Request: Serialize;
+    const PATH: &'static str;
+}
+
+/// Call a postcard-rpc endpoint on the target over RTT.
+pub fn rpc_call<E: RpcEndpoint>(payload: E::Request, timeout_ms: u64) -> TestStep {
+    TestStep::RpcCall(RpcAction {
+        path: E::PATH.to_string(),
+        payload: serde_json::to_value(payload).expect("RPC payload must be serializable"),
+        timeout_ms,
+    })
+}
+
 /// Block until `signal_path` meets `cond` within `timeout_ms`. Does not fail on timeout.
 pub fn wait_signal(signal_path: &str, cond: Condition, timeout_ms: u64) -> TestStep {
     TestStep::WaitForSignal(SignalWait {
@@ -144,22 +194,6 @@ pub fn wait_signal(signal_path: &str, cond: Condition, timeout_ms: u64) -> TestS
     })
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BranchStep {
-    pub signal_path: String,
-    pub timeout_ms: u64,
-    pub arms: Vec<BranchArm>,
-    /// Executed when no arm matches within timeout_ms.
-    /// If None and no arm matches, the test fails.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default: Option<Vec<TestStep>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BranchArm {
-    pub condition: Condition,
-    pub steps: Vec<TestStep>,
-}
 
 #[cfg(test)]
 mod tests {

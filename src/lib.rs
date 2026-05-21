@@ -31,6 +31,9 @@ pub enum TestStep {
     SendCan(CanAction),
     /// Assert that a signal meets a condition within a timeout; fails the test if not.
     AssertSignal(SignalAssertion),
+    /// Assert that a signal meets a condition continuously for the entire duration.
+    /// Fails immediately if any sample violates the condition.
+    HoldSignal(SignalHold),
     /// Block until a signal meets a condition. Does not fail on timeout — use when
     /// synchronizing to device state before making assertions.
     WaitForSignal(SignalWait),
@@ -55,7 +58,10 @@ impl TestStep {
         match self {
             TestStep::SendCan(_) => Some(Requirement::Can),
             TestStep::RpcCall(_) => Some(Requirement::Rtt),
-            _ => None,
+            TestStep::AssertSignal(_)
+            | TestStep::HoldSignal(_)
+            | TestStep::WaitForSignal(_)
+            | TestStep::Delay { .. } => None,
         }
     }
 }
@@ -85,6 +91,15 @@ pub struct SignalAssertion {
     pub signal_path: String,
     pub condition: Condition,
     pub timeout_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignalHold {
+    pub signal_path: String,
+    pub condition: Condition,
+    pub duration_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
@@ -185,6 +200,17 @@ pub fn rpc_call<E: RpcEndpoint>(payload: E::Request, timeout_ms: u64) -> TestSte
     })
 }
 
+/// Assert that `signal_path` meets `cond` for every sample during `duration_ms`.
+/// Fails immediately if any sample violates the condition.
+pub fn hold_signal(signal_path: &str, cond: Condition, duration_ms: u64, description: &str) -> TestStep {
+    TestStep::HoldSignal(SignalHold {
+        signal_path: signal_path.to_string(),
+        condition: cond,
+        duration_ms,
+        description: Some(description.to_string()),
+    })
+}
+
 /// Block until `signal_path` meets `cond` within `timeout_ms`. Does not fail on timeout.
 pub fn wait_signal(signal_path: &str, cond: Condition, timeout_ms: u64) -> TestStep {
     TestStep::WaitForSignal(SignalWait {
@@ -193,7 +219,6 @@ pub fn wait_signal(signal_path: &str, cond: Condition, timeout_ms: u64) -> TestS
         timeout_ms,
     })
 }
-
 
 #[cfg(test)]
 mod tests {

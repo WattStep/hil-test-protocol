@@ -5,11 +5,25 @@
 //! cargo run --example canopen_suite > canopen_suite.json
 //! ```
 //!
-//! It only uses the standard communication objects in `cia301`, so it runs
-//! against any CANopen node. The expected values are those of the WattStep
-//! `canopen` reference bin; change them for another device.
+//! The objects it uses are standard communication objects (CiA 301), defined
+//! here with `sdo_object!`; a device's own objects are defined the same way,
+//! or generated from its object dictionary. The expected values are those of
+//! the WattStep `canopen` reference bin; change them for another device.
 
 use hil_test_protocol::*;
+
+sdo_object!(
+    /// 0x1001: a bit per error class, 0 when there is no error.
+    ErrorRegister, 0x1001, 0, U8
+);
+sdo_object!(DeviceName, 0x1008, 0, VisibleString);
+sdo_object!(
+    /// 0x1017: the heartbeat period in ms.
+    ProducerHeartbeatTime, 0x1017, 0, U16
+);
+sdo_object!(VendorId, 0x1018, 1, U32);
+sdo_object!(ProductCode, 0x1018, 2, U32);
+sdo_object!(RevisionNumber, 0x1018, 3, U32);
 
 /// The node under test.
 const DUT: u8 = 1;
@@ -36,14 +50,10 @@ fn identity() -> TestCase {
         name: "Identity".into(),
         setup: vec![],
         steps: vec![
-            assert_sdo(DUT, cia301::VendorId(0), SDO_TIMEOUT_MS),
-            assert_sdo(DUT, cia301::ProductCode(1), SDO_TIMEOUT_MS),
-            assert_sdo(DUT, cia301::RevisionNumber(1), SDO_TIMEOUT_MS),
-            assert_sdo(
-                DUT,
-                cia301::DeviceName("WattStep inverter".into()),
-                SDO_TIMEOUT_MS,
-            ),
+            assert_sdo(DUT, VendorId(0), SDO_TIMEOUT_MS),
+            assert_sdo(DUT, ProductCode(1), SDO_TIMEOUT_MS),
+            assert_sdo(DUT, RevisionNumber(1), SDO_TIMEOUT_MS),
+            assert_sdo(DUT, DeviceName("WattStep inverter".into()), SDO_TIMEOUT_MS),
         ],
         teardown: vec![],
     }
@@ -54,15 +64,15 @@ fn heartbeat_time_is_read_only() -> TestCase {
         name: "Heartbeat time is read-only".into(),
         setup: vec![],
         steps: vec![
-            assert_sdo(DUT, cia301::ProducerHeartbeatTime(1000), SDO_TIMEOUT_MS),
+            assert_sdo(DUT, ProducerHeartbeatTime(1000), SDO_TIMEOUT_MS),
             sdo_write_refused(
                 DUT,
-                cia301::ProducerHeartbeatTime(500),
+                ProducerHeartbeatTime(500),
                 sdo_abort::READ_ONLY,
                 SDO_TIMEOUT_MS,
             ),
             // The refused write must not have changed it.
-            assert_sdo(DUT, cia301::ProducerHeartbeatTime(1000), SDO_TIMEOUT_MS),
+            assert_sdo(DUT, ProducerHeartbeatTime(1000), SDO_TIMEOUT_MS),
         ],
         teardown: vec![],
     }
@@ -78,11 +88,7 @@ fn nmt_stop_and_start() -> TestCase {
             nmt(DUT, NmtCommand::Start),
             delay(200),
             // SDO works again once the node is out of Stopped.
-            assert_sdo_condition::<cia301::ErrorRegister>(
-                DUT,
-                Condition::Equals(0.0),
-                SDO_TIMEOUT_MS,
-            ),
+            assert_sdo_condition::<ErrorRegister>(DUT, Condition::Equals(0.0), SDO_TIMEOUT_MS),
         ],
         // Leave the node running whatever happened above.
         teardown: vec![nmt(DUT, NmtCommand::Start)],

@@ -16,13 +16,18 @@
 //!     /// 0x6060 Modes of operation
 //!     ModesOfOperation, 0x6060, 0, I8 { ProfilePosition = 1, ProfileVelocity = 3 }
 //! );
+//! sdo_object!(
+//!     /// 0x1018 sub 2
+//!     ProductCode, 0x1018, 2, U32
+//! );
+//! sdo_object!(DeviceType, 0x1000, 0, U32);
 //! const DUT: u8 = 1;
 //!
 //! let steps = vec![
 //!     nmt(DUT, NmtCommand::Start),
 //!     sdo_write(DUT, ModesOfOperation::ProfileVelocity, 200),
-//!     assert_sdo(DUT, cia301::ProductCode(1), 200),
-//!     sdo_write_refused(DUT, cia301::DeviceType(0), sdo_abort::READ_ONLY, 200),
+//!     assert_sdo(DUT, ProductCode(1), 200),
+//!     sdo_write_refused(DUT, DeviceType(0), sdo_abort::READ_ONLY, 200),
 //! ];
 //! ```
 
@@ -139,7 +144,7 @@ fn exact<const N: usize>(data: &[u8]) -> Result<[u8; N], String> {
 ///
 /// Define objects with [`sdo_object!`](crate::sdo_object) and
 /// [`sdo_enum!`](crate::sdo_enum), or generate the impls from the device's
-/// object dictionary. The standard communication objects are in [`cia301`].
+/// object dictionary, so that tests and device share one definition.
 pub trait SdoObject {
     /// Shown in test reports instead of the index.
     const NAME: &'static str;
@@ -497,52 +502,6 @@ pub mod sdo_abort {
     }
 }
 
-/// The communication objects every CANopen device has (CiA 301). Device
-/// profile and manufacturer objects are defined by the firmware, from its
-/// object dictionary.
-pub mod cia301 {
-    crate::sdo_object!(
-        /// 0x1000: the device profile the device follows.
-        DeviceType, 0x1000, 0, U32
-    );
-    crate::sdo_object!(
-        /// 0x1001: a bit per error class, 0 when there is no error.
-        ErrorRegister, 0x1001, 0, U8
-    );
-    crate::sdo_object!(
-        /// 0x1008
-        DeviceName, 0x1008, 0, VisibleString
-    );
-    crate::sdo_object!(
-        /// 0x1009
-        HardwareVersion, 0x1009, 0, VisibleString
-    );
-    crate::sdo_object!(
-        /// 0x100A
-        SoftwareVersion, 0x100A, 0, VisibleString
-    );
-    crate::sdo_object!(
-        /// 0x1017: the heartbeat period in ms, 0 when the heartbeat is off.
-        ProducerHeartbeatTime, 0x1017, 0, U16
-    );
-    crate::sdo_object!(
-        /// 0x1018 sub 1
-        VendorId, 0x1018, 1, U32
-    );
-    crate::sdo_object!(
-        /// 0x1018 sub 2
-        ProductCode, 0x1018, 2, U32
-    );
-    crate::sdo_object!(
-        /// 0x1018 sub 3
-        RevisionNumber, 0x1018, 3, U32
-    );
-    crate::sdo_object!(
-        /// 0x1018 sub 4
-        SerialNumber, 0x1018, 4, U32
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -552,6 +511,10 @@ mod tests {
         /// 0x6060 Modes of operation
         ModesOfOperation, 0x6060, 0, I8 { Homing = 6, ProfileVelocity = 3, Manufacturer = -1 }
     );
+    crate::sdo_object!(DeviceType, 0x1000, 0, U32);
+    crate::sdo_object!(DeviceName, 0x1008, 0, VisibleString);
+    crate::sdo_object!(ProducerHeartbeatTime, 0x1017, 0, U16);
+    crate::sdo_object!(ProductCode, 0x1018, 2, U32);
 
     #[test]
     fn numeric_values_round_trip_little_endian() {
@@ -582,8 +545,7 @@ mod tests {
 
     #[test]
     fn object_types_carry_address_type_and_value() {
-        let TestStep::SdoWrite(write) = sdo_write(2, cia301::ProducerHeartbeatTime(500), 200)
-        else {
+        let TestStep::SdoWrite(write) = sdo_write(2, ProducerHeartbeatTime(500), 200) else {
             panic!("sdo_write builds an SdoWrite step");
         };
         assert_eq!(
@@ -633,12 +595,8 @@ mod tests {
             setup: vec![nmt(ALL_NODES, NmtCommand::Start)],
             steps: vec![
                 sdo_write(2, ModesOfOperation::Homing, 200),
-                assert_sdo(1, cia301::ProductCode(1), 200),
-                assert_sdo_condition::<cia301::ProducerHeartbeatTime>(
-                    1,
-                    Condition::GreaterThan(0.0),
-                    200,
-                ),
+                assert_sdo(1, ProductCode(1), 200),
+                assert_sdo_condition::<ProducerHeartbeatTime>(1, Condition::GreaterThan(0.0), 200),
             ],
             teardown: vec![],
         };
@@ -652,9 +610,9 @@ mod tests {
     #[test]
     fn canopen_steps_round_trip_through_json() {
         let steps = vec![
-            sdo_write_refused(1, cia301::DeviceType(0), sdo_abort::READ_ONLY, 200),
-            assert_sdo(1, cia301::DeviceName("drive".into()), 200),
-            assert_sdo_read_refused::<cia301::DeviceType>(1, sdo_abort::WRITE_ONLY, 200),
+            sdo_write_refused(1, DeviceType(0), sdo_abort::READ_ONLY, 200),
+            assert_sdo(1, DeviceName("drive".into()), 200),
+            assert_sdo_read_refused::<DeviceType>(1, sdo_abort::WRITE_ONLY, 200),
             nmt(1, NmtCommand::PreOperational),
         ];
         let json = serde_json::to_string(&steps).unwrap();

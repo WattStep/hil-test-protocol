@@ -1,6 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use serde::{Deserialize, Serialize};
+
+mod canopen;
+pub use canopen::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestSuite {
@@ -22,6 +25,8 @@ pub struct TestCase {
 pub enum Requirement {
     Can,
     Rtt,
+    /// CANopen master mode, for SDO and NMT steps.
+    CanOpen,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +45,12 @@ pub enum TestStep {
     Delay { ms: u64 },
     /// Call a postcard-rpc endpoint on the target over RTT. Requires a debugger connection.
     RpcCall(RpcAction),
+    /// Write an object in a CANopen node's object dictionary.
+    SdoWrite(SdoWriteAction),
+    /// Read an object from a CANopen node and assert on it.
+    SdoRead(SdoReadAssertion),
+    /// Send an NMT command to a CANopen node, or to all of them.
+    Nmt(NmtAction),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,10 +68,24 @@ impl TestStep {
         match self {
             TestStep::SendCan(_) => Some(Requirement::Can),
             TestStep::RpcCall(_) => Some(Requirement::Rtt),
+            TestStep::SdoWrite(_) | TestStep::SdoRead(_) | TestStep::Nmt(_) => {
+                Some(Requirement::CanOpen)
+            }
             TestStep::AssertSignal(_)
             | TestStep::HoldSignal(_)
             | TestStep::WaitForSignal(_)
             | TestStep::Delay { .. } => None,
+        }
+    }
+
+    /// The CANopen node this step addresses, if it addresses one. `None` for
+    /// an NMT command to all nodes.
+    pub fn canopen_node(&self) -> Option<u8> {
+        match self {
+            TestStep::SdoWrite(write) => Some(write.address.node_id),
+            TestStep::SdoRead(read) => Some(read.address.node_id),
+            TestStep::Nmt(action) if action.node_id != ALL_NODES => Some(action.node_id),
+            _ => None,
         }
     }
 }
@@ -72,6 +97,17 @@ impl TestCase {
             .chain(&self.steps)
             .chain(&self.teardown)
             .filter_map(|s| s.requirement())
+            .collect()
+    }
+
+    /// The CANopen nodes the test addresses, so a runner can check they are
+    /// all ones it is set up to talk to.
+    pub fn canopen_nodes(&self) -> BTreeSet<u8> {
+        self.setup
+            .iter()
+            .chain(&self.steps)
+            .chain(&self.teardown)
+            .filter_map(|s| s.canopen_node())
             .collect()
     }
 }
@@ -110,7 +146,7 @@ pub struct SignalWait {
     pub timeout_ms: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Condition {
     Equals(f32),
     GreaterThan(f32),

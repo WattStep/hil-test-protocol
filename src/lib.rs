@@ -31,8 +31,7 @@ pub enum TestStep {
     SendCan(CanAction),
     /// Assert that a signal meets a condition within a timeout; fails the test if not.
     AssertSignal(SignalAssertion),
-    /// Assert that a signal meets a condition continuously for the entire duration.
-    /// Fails immediately if any sample violates the condition.
+    /// Monitor a signal for the entire duration; fails at the end if any sample violated the condition.
     HoldSignal(SignalHold),
     /// Block until a signal meets a condition. Does not fail on timeout — use when
     /// synchronizing to device state before making assertions.
@@ -200,8 +199,7 @@ pub fn rpc_call<E: RpcEndpoint>(payload: E::Request, timeout_ms: u64) -> TestSte
     })
 }
 
-/// Assert that `signal_path` meets `cond` for every sample during `duration_ms`.
-/// Fails immediately if any sample violates the condition.
+/// Monitor `signal_path` for the entire `duration_ms`; fails at the end if any sample violated `cond`.
 pub fn hold_signal(signal_path: &str, cond: Condition, duration_ms: u64, description: &str) -> TestStep {
     TestStep::HoldSignal(SignalHold {
         signal_path: signal_path.to_string(),

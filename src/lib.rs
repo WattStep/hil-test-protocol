@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashSet};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +10,17 @@ pub use canopen::*;
 pub struct TestSuite {
     pub name: String,
     pub tests: Vec<TestCase>,
+}
+
+impl TestSuite {
+    /// Write the suite to `path` as the JSON AmpTrace loads, creating its directory.
+    pub fn write_json(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        let path = path.as_ref();
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(path, serde_json::to_string_pretty(self)?)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -236,7 +248,12 @@ pub fn rpc_call<E: RpcEndpoint>(payload: E::Request, timeout_ms: u64) -> TestSte
 }
 
 /// Monitor `signal_path` for the entire `duration_ms`; fails at the end if any sample violated `cond`.
-pub fn hold_signal(signal_path: &str, cond: Condition, duration_ms: u64, description: &str) -> TestStep {
+pub fn hold_signal(
+    signal_path: &str,
+    cond: Condition,
+    duration_ms: u64,
+    description: &str,
+) -> TestStep {
     TestStep::HoldSignal(SignalHold {
         signal_path: signal_path.to_string(),
         condition: cond,
@@ -310,5 +327,28 @@ mod tests {
         let roundtripped: TestSuite = serde_json::from_str(&json).unwrap();
         assert_eq!(roundtripped.tests.len(), 1);
         assert_eq!(roundtripped.tests[0].steps.len(), 3);
+    }
+
+    #[test]
+    fn write_json_creates_the_directory_and_reads_back() {
+        let suite = TestSuite {
+            name: "written".into(),
+            tests: vec![TestCase {
+                name: "pause".into(),
+                setup: vec![],
+                steps: vec![delay(10)],
+                teardown: vec![],
+            }],
+        };
+        let dir = std::env::temp_dir().join(format!("hil_test_protocol_{}", std::process::id()));
+        let path = dir.join("nested/suite.json");
+
+        suite.write_json(&path).unwrap();
+        let back: TestSuite =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(back.name, "written");
+        assert_eq!(back.tests[0].steps.len(), 1);
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

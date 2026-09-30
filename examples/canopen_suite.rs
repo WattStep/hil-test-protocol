@@ -19,7 +19,11 @@ const SDO_TIMEOUT_MS: u64 = 300;
 fn main() {
     let suite = TestSuite {
         name: "CANopen communication objects".into(),
-        tests: vec![identity(), heartbeat_time_is_read_only(), nmt_stop_and_start()],
+        tests: vec![
+            identity(),
+            heartbeat_time_is_read_only(),
+            nmt_stop_and_start(),
+        ],
     };
     println!(
         "{}",
